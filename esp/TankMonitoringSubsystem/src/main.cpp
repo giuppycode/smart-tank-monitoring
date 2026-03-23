@@ -1,28 +1,24 @@
-#include <WiFi.h>
-#include <PubSubClient.h>
-#define MSG_BUFFER_SIZE 50
+#include <Arduino.h>
+#include "config.h"
+#include "kernel/Scheduler.h"
+#include "model/TankMonitoringPlatform.h"
+#include "model/Context.h"
+#include "tasks/SensorTask.h"
+#include "tasks/PublishTask.h"
+#include "tasks/ConnectionTask.h"
+#include "kernel/Logger.h"
+#include "kernel/MsgService.h"
 
-/* wifi network info */
+Scheduler sched;
+TankMonitoringPlatform *pTankMonitoringPlatform;
+Context *pContext;
 
-/* MQTT server address */
-const char *mqtt_server = "broker.mqtt-dashboard.com";
-
-/* MQTT topic */
-const char *topic = "esiot-2025";
-
-/* MQTT client management */
-
-WiFiClient espClient;
-PubSubClient client(espClient);
-
-unsigned long lastMsgTime = 0;
-char msg[MSG_BUFFER_SIZE];
-int value = 0;
-
-void setup_wifi()
+void setup()
 {
-  delay(10);
-  Serial.println(String("Connecting to ") + WIFI_SSID);
+  MsgService.init();
+  Serial.begin(115200);
+
+  // 1. WiFi
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   while (WiFi.status() != WL_CONNECTED)
@@ -30,78 +26,33 @@ void setup_wifi()
     delay(500);
     Serial.print(".");
   }
-  Serial.println("");
-  Serial.println("WiFi connected");
-  Serial.println("IP address: ");
-  Serial.println(WiFi.localIP());
-}
+  Logger.log("WiFi connected: " + WiFi.localIP().toString());
 
-/* MQTT subscribing callback */
+  // 2. MQTT server config
+  pTankMonitoringPlatform = new TankMonitoringPlatform();
+  pTankMonitoringPlatform->init(); // chiama setServer() internamente
 
-void callback(char *topic, byte *payload, unsigned int length)
-{
-  Serial.println(String("Message arrived on [") + topic + "] len: " + length + " txt: " + String((char *)payload, length));
-}
-
-void reconnect()
-{
-
-  // Loop until we're reconnected
-
-  while (!client.connected())
-  {
-    Serial.print("Attempting MQTT connection...");
-
-    // Create a random client ID
-    String clientId = String("esiot-2025-client-") + String(random(0xffff), HEX);
-
-    // Attempt to connect
-    if (client.connect(clientId.c_str()))
-    {
-      Serial.println("connected");
-      client.subscribe(topic);
-    }
-    else
-    {
-      Serial.print("failed, rc=");
-      Serial.print(client.state());
-      Serial.println(" try again in 5 seconds");
-      // Wait 5 seconds before retrying
-      delay(5000);
-    }
-  }
-}
-
-void setup()
-{
-  Serial.begin(115200);
-  setup_wifi();
+  sched.init(50);
   randomSeed(micros());
-  client.setServer(mqtt_server, 1883);
-  client.setCallback(callback);
+
+#ifndef __TESTING_HW__
+  pContext = new Context();
+
+  Task *pSensorTask = new SensorTask(pTankMonitoringPlatform->getSonar(), pContext);
+  pSensorTask->init(200);
+  sched.addTask(pSensorTask);
+
+  Task *pPublishTask = new PublishTask(pTankMonitoringPlatform->getMQTTClient(), pContext);
+  pPublishTask->init(2000);
+  sched.addTask(pPublishTask);
+
+  Task *pConnectionTask = new ConnectionTask(pTankMonitoringPlatform->getMQTTClient());
+  pConnectionTask->init(50);
+  sched.addTask(pConnectionTask);
+#endif
 }
 
 void loop()
 {
-
-  if (!client.connected())
-  {
-    reconnect();
-  }
-  client.loop();
-
-  unsigned long now = millis();
-  if (now - lastMsgTime > 10000)
-  {
-    lastMsgTime = now;
-    value++;
-
-    /* creating a msg in the buffer */
-    snprintf(msg, MSG_BUFFER_SIZE, "hello world #%ld", value);
-
-    Serial.println(String("Publishing message: ") + msg);
-
-    /* publishing the msg */
-    client.publish(topic, msg);
-  }
+  sched.schedule();
 }
