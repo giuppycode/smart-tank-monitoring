@@ -18,17 +18,6 @@ void setup()
   MsgService.init();
   Serial.begin(115200);
 
-  // 1. WiFi
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    delay(500);
-    Serial.print(".");
-  }
-  Logger.log("WiFi connected: " + WiFi.localIP().toString());
-
-  // 2. MQTT server config
   pTankMonitoringPlatform = new TankMonitoringPlatform();
   pTankMonitoringPlatform->init();
 
@@ -47,7 +36,7 @@ void setup()
   sched.addTask(pPublishTask);
 
   Task *pConnectionTask = new ConnectionTask(pTankMonitoringPlatform->getMQTTClient(), pTankMonitoringPlatform->getGreenLED(), pTankMonitoringPlatform->getRedLED());
-  pConnectionTask->init(50);
+  pConnectionTask->init(1000);
   sched.addTask(pConnectionTask);
 #endif
 }

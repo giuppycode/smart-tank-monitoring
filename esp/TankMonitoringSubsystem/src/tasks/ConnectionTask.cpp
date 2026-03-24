@@ -14,17 +14,6 @@ void ConnectionTask::setState(ConnectionState newState)
     state = newState;
     stateTimestamp = millis();
     justEntered = true;
-
-    if (state == CHECKING)
-    {
-        pGreenLED->switchOn();
-        pRedLED->switchOff();
-    }
-    else
-    {
-        pGreenLED->switchOff();
-        pRedLED->switchOn();
-    }
 }
 
 bool ConnectionTask::checkAndSetJustEntered()
@@ -46,13 +35,19 @@ void ConnectionTask::tick()
         if (WiFi.status() != WL_CONNECTED)
         {
             Logger.log("[ConnectionTask] WiFi lost, reconnecting...");
+            this->pGreenLED->switchOff();
+            this->pRedLED->switchOn();
             setState(RECONNECTING_WIFI);
         }
         else if (!pClient->connected())
         {
             Logger.log("[ConnectionTask] MQTT lost, reconnecting...");
+            this->pGreenLED->switchOff();
+            this->pRedLED->switchOn();
             setState(RECONNECTING_MQTT);
         }
+        this->pGreenLED->switchOn();
+        this->pRedLED->switchOff();
         break;
 
     case RECONNECTING_WIFI:

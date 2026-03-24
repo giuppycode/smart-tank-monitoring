@@ -11,6 +11,14 @@ TankMonitoringPlatform::TankMonitoringPlatform()
 
 void TankMonitoringPlatform::init()
 {
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    delay(500);
+    Serial.print("Trying to connect to WiFi...\n");
+  }
+  Logger.log("WiFi connected: " + WiFi.localIP().toString());
   pMQTTClient->setServer(MQTT_BROKER, MQTT_PORT);
 }
 
