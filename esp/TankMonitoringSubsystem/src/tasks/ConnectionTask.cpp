@@ -1,11 +1,12 @@
 #include "ConnectionTask.h"
 #include "kernel/Logger.h"
 
-ConnectionTask::ConnectionTask(PubSubClient *pClient, Led *pGreenLED, Led *pRedLED)
+ConnectionTask::ConnectionTask(PubSubClient *pClient, Led *pGreenLED, Led *pRedLED, Context *pContext)
 {
     this->pClient = pClient;
     this->pGreenLED = pGreenLED;
     this->pRedLED = pRedLED;
+    this->pContext = pContext;
     setState(CHECKING);
 }
 
@@ -32,27 +33,35 @@ void ConnectionTask::tick()
     switch (state)
     {
     case CHECKING:
+        if (this->checkAndSetJustEntered())
+        {
+            Logger.log("[ConnectionTask] Entered CHECKING state");
+        }
         if (WiFi.status() != WL_CONNECTED)
         {
             Logger.log("[ConnectionTask] WiFi lost, reconnecting...");
-            this->pGreenLED->switchOff();
-            this->pRedLED->switchOn();
             setState(RECONNECTING_WIFI);
         }
         else if (!pClient->connected())
         {
             Logger.log("[ConnectionTask] MQTT lost, reconnecting...");
-            this->pGreenLED->switchOff();
-            this->pRedLED->switchOn();
             setState(RECONNECTING_MQTT);
         }
-        this->pGreenLED->switchOn();
-        this->pRedLED->switchOff();
+
+        else if (WiFi.status() == WL_CONNECTED && pClient->connected())
+        {
+            pContext->setConnected(true);
+            this->pGreenLED->switchOn();
+            this->pRedLED->switchOff();
+        }
         break;
 
     case RECONNECTING_WIFI:
-        if (checkAndSetJustEntered())
+        if (this->checkAndSetJustEntered())
         {
+            pContext->setConnected(false);
+            this->pGreenLED->switchOff();
+            this->pRedLED->switchOn();
             WiFi.disconnect();
             WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
         }
@@ -64,9 +73,11 @@ void ConnectionTask::tick()
         break;
 
     case RECONNECTING_MQTT:
-        if (checkAndSetJustEntered())
+        if (this->checkAndSetJustEntered())
         {
-            // reset eventuale stato precedente
+            pContext->setConnected(false);
+            this->pGreenLED->switchOff();
+            this->pRedLED->switchOn();
             pClient->disconnect();
         }
         String clientId = String("esiot-client-") + String(random(0xffff), HEX);

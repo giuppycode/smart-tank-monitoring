@@ -35,7 +35,7 @@ void setup()
   pPublishTask->init(2000);
   sched.addTask(pPublishTask);
 
-  Task *pConnectionTask = new ConnectionTask(pTankMonitoringPlatform->getMQTTClient(), pTankMonitoringPlatform->getGreenLED(), pTankMonitoringPlatform->getRedLED());
+  Task *pConnectionTask = new ConnectionTask(pTankMonitoringPlatform->getMQTTClient(), pTankMonitoringPlatform->getGreenLED(), pTankMonitoringPlatform->getRedLED(), pContext);
   pConnectionTask->init(1000);
   sched.addTask(pConnectionTask);
 #endif

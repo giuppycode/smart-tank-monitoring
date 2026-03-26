@@ -9,9 +9,12 @@ public:
 
   void setCurrentDistance(float dist);
   float getCurrentDistance();
+  void setConnected(bool conn);
+  bool isConnected();
 
 private:
   float currentDistance;
+  bool connected;
 };
 
 #endif

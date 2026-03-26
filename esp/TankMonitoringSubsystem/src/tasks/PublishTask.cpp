@@ -11,7 +11,13 @@ PublishTask::PublishTask(PubSubClient *pClient, Context *pContext)
 void PublishTask::tick()
 {
     float distance = pContext->getCurrentDistance();
+    bool connected = pContext->isConnected();
 
+    if (!connected)
+    {
+        Logger.log("[PublishTask] Not connected, skipping publish");
+        return;
+    }
     if (distance == NO_OBJ_DETECTED)
     {
         Logger.log("[PublishTask] No valid distance, skipping");

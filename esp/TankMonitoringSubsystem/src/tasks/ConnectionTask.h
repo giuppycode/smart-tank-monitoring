@@ -6,6 +6,7 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include "config.h"
+#include "model/Context.h"
 
 enum ConnectionState
 {
@@ -17,13 +18,14 @@ enum ConnectionState
 class ConnectionTask : public Task
 {
 public:
-    ConnectionTask(PubSubClient *pClient, Led *pGreenLED, Led *pRedLED);
+    ConnectionTask(PubSubClient *pClient, Led *pGreenLED, Led *pRedLED, Context *pContext);
     void tick() override;
 
 private:
     PubSubClient *pClient;
     Led *pGreenLED;
     Led *pRedLED;
+    Context *pContext;
     ConnectionState state;
     void setState(ConnectionState newState);
     unsigned long stateTimestamp;
