@@ -46,7 +46,9 @@ void ValveMotor::setAngle(int angle)
         float coeff = (2400.0 - 544.0) / 180.0;
         motor.write(544 + angle * coeff);
         currentAngle = angle;
-        currentPercent = map(angle, 0, 90, 0, 100);
+        currentPercent = map(angle, 0, 90, 100, 0);
+        delay(500);
+        safeDetach();
     }
 }
 
