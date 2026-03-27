@@ -16,8 +16,8 @@ public:
   void setUnconnected();
   bool isUnconnected();
 
-  void setPotValue(int value);
-  int getPotValue();
+  void setPotValue(float value);
+  float getPotValue();
 
   void setCurrentDistance(float dist);
   float getCurrentDistance();
@@ -26,7 +26,7 @@ private:
   bool automatic;
   bool manual;
   bool unconnected;
-  int potValue;
+  float potValue;
   float currentDistance;
 };
 

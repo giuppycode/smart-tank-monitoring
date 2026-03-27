@@ -23,6 +23,26 @@ void DisplayLcd::showMessage(const String &message)
     }
 }
 
+void DisplayLcd::showPercentage(int percentage)
+{
+    lcd.setCursor(0, 1);
+    lcd.print("Valve: ");
+    lcd.print(percentage);
+    lcd.print("%   ");
+}
+
+void DisplayLcd::showModeAndPercentage(const String &mode, int percentage)
+{
+    clear();
+    lcd.setCursor(0, 0);
+    lcd.print(mode);
+    lcd.setCursor(0, 1);
+    lcd.print("Valve: ");
+    lcd.print(percentage);
+    lcd.print("%   ");
+    currentMessage = mode;
+}
+
 void DisplayLcd::clear()
 {
     lcd.clear();

@@ -29,11 +29,11 @@ void setup()
   pContext = new Context();
 
   Task *pFSMController = new FSMController(pWaterChannelPlatform->getDisplayLcd(), pWaterChannelPlatform->getValveMotor(), pWaterChannelPlatform->getPot(), pWaterChannelPlatform->getButton(), pContext);
-  pFSMController->init(200);
+  pFSMController->init(75);
   sched.addTask(pFSMController);
 
   Task *pPotReader = new PotReader(pWaterChannelPlatform->getPot(), pContext);
-  pPotReader->init(100);
+  pPotReader->init(200);
   sched.addTask(pPotReader);
 
 #endif

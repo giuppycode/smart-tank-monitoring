@@ -24,10 +24,10 @@ void ValveMotor::setAngle(int angle)
 
 void ValveMotor::open()
 {
-
     motor.attach(_pin);
-    setAngle(90);
+    setAngle(0);
     delay(1000);
+    motor.detach();
 }
 
 void ValveMotor::half()
@@ -41,7 +41,7 @@ void ValveMotor::half()
 void ValveMotor::close()
 {
     motor.attach(_pin);
-    setAngle(0);
+    setAngle(90);
     delay(1000);
     motor.detach();
 }

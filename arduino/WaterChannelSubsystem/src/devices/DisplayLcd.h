@@ -20,6 +20,8 @@ public:
   void init();
 
   void showMessage(const String &message);
+  void showPercentage(int percentage);
+  void showModeAndPercentage(const String &mode, int percentage);
   void clear();
   void setBacklight(bool state);
 

@@ -28,7 +28,6 @@ void FSMController::tick()
             if (this->checkAndSetJustEntered())
             {
                 Logger.log("[FSM] Entered AUTOMATIC");
-                pDisplay->showMessage("AUTOMATIC");
                 pValveMotor->close();
             }
             if (pButton->isPressed())
@@ -37,14 +36,23 @@ void FSMController::tick()
             }
 
             float currentDistance = pContext->getCurrentDistance();
+            int percentage = 0;
             if (currentDistance > L1 && currentDistance < L2)
             {
                 pValveMotor->half(); // al 50%
+                percentage = 50;
             }
             else if (currentDistance >= L2)
             {
                 pValveMotor->open(); // al 100%
+                percentage = 100;
             }
+            else
+            {
+                pValveMotor->close(); // al 0%
+                percentage = 0;
+            }
+            pDisplay->showModeAndPercentage("AUTOMATIC", percentage);
         }
         else
         {
@@ -60,16 +68,17 @@ void FSMController::tick()
             if (this->checkAndSetJustEntered())
             {
                 Logger.log("[FSM] Entered MANUAL");
-                pDisplay->showMessage("MANUAL");
             }
             if (pButton->isPressed())
             {
                 setState(AUTOMATIC);
             }
-            int potValue = pContext->getPotValue();
-            int angle = (int)(potValue * 180); // Converti il valore del
+            float potValue = pContext->getPotValue();
+            int angle = (int)((1.0 - potValue) * 90); // Inverted: 0% pot = 90° (closed), 100% pot = 0° (open)
+            int percentage = (int)(potValue * 100); // potValue 0-1 maps to 0-100%
 
             pValveMotor->manuallySetAngle(angle);
+            pDisplay->showModeAndPercentage("MANUAL", percentage);
         }
         else
         {
@@ -79,15 +88,13 @@ void FSMController::tick()
         break;
 
     case UNCONNECTED:
-        if (pContext->isUnconnected())
+
+        if (this->checkAndSetJustEntered())
         {
             pContext->setUnconnected();
-            if (this->checkAndSetJustEntered())
-            {
-                conditionStartTime = 0;
-                pDisplay->showMessage("UNCONNECTED");
-            }
+            pDisplay->showModeAndPercentage("UNCONNECTED", 0);
         }
+
         else if (pContext->isAutomatic())
         {
             setState(AUTOMATIC);

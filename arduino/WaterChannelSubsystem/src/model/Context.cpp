@@ -29,7 +29,7 @@ void Context::setUnconnected()
   automatic = false;
   manual = false;
 }
-void Context::setPotValue(int value)
+void Context::setPotValue(float value)
 {
   potValue = value;
 }
