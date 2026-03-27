@@ -18,9 +18,11 @@ public class DataService extends AbstractVerticle {
 
 	private int port;
 	private static final int MAX_SIZE = 10;
+	private static final long TIMEOUT_MS = 3000;
 	private LinkedList<DataPoint> values;
 	private String mode = "AUTOMATIC";
 	private float valvePercent = 0;
+	private long lastReceived = System.currentTimeMillis();
 	
 	public DataService(int port) {
 		values = new LinkedList<>();		
@@ -61,6 +63,7 @@ public class DataService extends AbstractVerticle {
 			if (values.size() > MAX_SIZE) {
 				values.removeLast();
 			}
+			lastReceived = time;
 			
 			log("New value: " + value + " from " + place + " on " + new Date(time));
 			response.setStatusCode(200).end();
@@ -92,7 +95,11 @@ public class DataService extends AbstractVerticle {
 
 	private void handleGetStatus(RoutingContext ctx) {
     JsonObject obj = new JsonObject();
-    obj.put("mode", mode);
+    String effectiveMode = mode;
+    if (System.currentTimeMillis() - lastReceived > TIMEOUT_MS) {
+        effectiveMode = "UNCONNECTED";
+    }
+    obj.put("mode", effectiveMode);
     ctx.response()
         .putHeader("content-type", "application/json")
         .putHeader("Access-Control-Allow-Origin", "*")
