@@ -12,6 +12,7 @@
 package esiot.backend;
 
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
 import org.eclipse.paho.client.mqttv3.MqttCallback;
@@ -21,6 +22,7 @@ import org.eclipse.paho.client.mqttv3.MqttMessage;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.web.client.WebClient;
+import io.vertx.core.eventbus.EventBus;
 
 /**
  * Classe principale del Control Unit Subsystem
@@ -38,6 +40,12 @@ public class CUS {
     
     /** Timeout in millisecondi per considerare il sensore non raggiungibile */
     static final long TIMEOUT_MS = 3000;
+    
+    /** Serial service for communicating with WCS */
+    static SerialService serialService;
+    
+    /** Current mode for serial communication */
+    static String currentMode = "AUTOMATIC";
 
     /**
      * Metodo principale di avvio dell'applicazione
@@ -46,14 +54,35 @@ public class CUS {
      * @throws Exception se si verifica un errore durante l'avvio
      */
     public static void main(String[] args) throws Exception {
+        serialService = new SerialService();
+        serialService.connect();
+        
         Vertx vertx = Vertx.vertx();
         DataService service = new DataService(PORT);
         vertx.deployVerticle(service);
+
+        EventBus eb = vertx.eventBus();
+        eb.consumer("serial.commands", message -> {
+            JsonObject msg = (JsonObject) message.body();
+            String type = msg.getString("type");
+            String value = msg.getString("value");
+            
+            if ("mode".equals(type)) {
+                serialService.sendMode(value);
+                currentMode = value;
+                System.out.println("[EVENTBUS] Mode command: " + value);
+            } else if ("valve".equals(type)) {
+                int valve = msg.getInteger("value");
+                serialService.sendValve(valve);
+                System.out.println("[EVENTBUS] Valve command: " + valve);
+            }
+        });
 
         WebClient client = WebClient.create(vertx);
 
         // Timestamp dell'ultimo messaggio ricevuto
         AtomicLong lastReceived = new AtomicLong(System.currentTimeMillis());
+        AtomicBoolean isUnconnected = new AtomicBoolean(false);
 
         String clientId = "cus-" + System.currentTimeMillis();
         MqttClient mqtt = new MqttClient(BROKER, clientId);
@@ -102,8 +131,15 @@ public class CUS {
             long elapsed = System.currentTimeMillis() - lastReceived.get();
             if (elapsed > TIMEOUT_MS) {
                 System.out.println("[MQTT] Status: unreachable (nessun dato da " + elapsed / 1000 + "s)");
+                if (isUnconnected.compareAndSet(false, true)) {
+                    serialService.sendMode("UNCONNECTED");
+                    currentMode = "UNCONNECTED";
+                }
             } else {
                 System.out.println("[MQTT] Status: connected");
+                if (isUnconnected.compareAndSet(true, false)) {
+                    serialService.sendMode(currentMode);
+                }
             }
         });
     }

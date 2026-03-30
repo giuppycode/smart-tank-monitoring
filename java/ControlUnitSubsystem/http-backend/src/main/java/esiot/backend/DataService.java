@@ -10,6 +10,7 @@ import io.vertx.core.json.JsonObject;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
 import io.vertx.ext.web.handler.BodyHandler;
+import io.vertx.core.eventbus.EventBus;
 
 /*
  * Data Service as a vertx event-loop 
@@ -23,6 +24,7 @@ public class DataService extends AbstractVerticle {
 	private String mode = "AUTOMATIC";
 	private float valvePercent = 0;
 	private long lastReceived = System.currentTimeMillis();
+	private EventBus eventBus;
 	
 	public DataService(int port) {
 		values = new LinkedList<>();		
@@ -31,6 +33,8 @@ public class DataService extends AbstractVerticle {
 
 	@Override
 	public void start() {		
+		eventBus = vertx.eventBus();
+		
 		Router router = Router.router(vertx);
 		router.route().handler(BodyHandler.create());
 		router.post("/api/data").handler(this::handleAddNewData);
@@ -109,7 +113,14 @@ public class DataService extends AbstractVerticle {
 private void handleSetStatus(RoutingContext ctx) {
     JsonObject body = ctx.getBodyAsJson();
     if (body == null) { sendError(400, ctx.response()); return; }
-    mode = body.getString("mode", mode);
+    String newMode = body.getString("mode", mode);
+    if (!newMode.equals(mode)) {
+        mode = newMode;
+        JsonObject msg = new JsonObject();
+        msg.put("type", "mode");
+        msg.put("value", mode);
+        eventBus.send("serial.commands", msg);
+    }
     log("Mode changed to: " + mode);
     ctx.response().putHeader("Access-Control-Allow-Origin", "*")
        .setStatusCode(200).end();
@@ -129,6 +140,12 @@ private void handleSetValve(RoutingContext ctx) {
     if (body == null) { sendError(400, ctx.response()); return; }
     valvePercent = body.getFloat("percent", valvePercent);
     log("Valve set to: " + valvePercent + "%");
+    
+    JsonObject msg = new JsonObject();
+    msg.put("type", "valve");
+    msg.put("value", (int) valvePercent);
+    eventBus.send("serial.commands", msg);
+    
     ctx.response().putHeader("Access-Control-Allow-Origin", "*")
        .setStatusCode(200).end();
 }
