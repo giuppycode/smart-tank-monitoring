@@ -12,6 +12,7 @@
 package esiot.backend;
 
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
 import org.eclipse.paho.client.mqttv3.MqttCallback;
@@ -25,6 +26,7 @@ import com.fazecast.jSerialComm.SerialPortEvent;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.web.client.WebClient;
+import io.vertx.core.eventbus.EventBus;
 
 /**
  * Classe principale del Control Unit Subsystem.
@@ -42,6 +44,12 @@ public class CUS {
 
     /** Timeout in millisecondi per considerare il sensore non raggiungibile */
     static final long TIMEOUT_MS = 3000;
+    
+    /** Serial service for communicating with WCS */
+    static SerialService serialService;
+    
+    /** Current mode for serial communication */
+    static String currentMode = "AUTOMATIC";
 
     /**
      * Invia una stringa sulla porta seriale in modo sicuro (lunghezza calcolata
@@ -53,14 +61,35 @@ public class CUS {
     }
 
     public static void main(String[] args) throws Exception {
+        serialService = new SerialService();
+        serialService.connect();
+        
         Vertx vertx = Vertx.vertx();
         DataService service = new DataService(PORT);
         vertx.deployVerticle(service);
+
+        EventBus eb = vertx.eventBus();
+        eb.consumer("serial.commands", message -> {
+            JsonObject msg = (JsonObject) message.body();
+            String type = msg.getString("type");
+            String value = msg.getString("value");
+            
+            if ("mode".equals(type)) {
+                serialService.sendMode(value);
+                currentMode = value;
+                System.out.println("[EVENTBUS] Mode command: " + value);
+            } else if ("valve".equals(type)) {
+                int valve = msg.getInteger("value");
+                serialService.sendValve(valve);
+                System.out.println("[EVENTBUS] Valve command: " + valve);
+            }
+        });
 
         WebClient client = WebClient.create(vertx);
 
         // Timestamp dell'ultimo messaggio MQTT ricevuto
         AtomicLong lastReceived = new AtomicLong(System.currentTimeMillis());
+        AtomicBoolean isUnconnected = new AtomicBoolean(false);
 
         // ------------------------------------------------------------------ //
         //  MQTT
@@ -226,75 +255,18 @@ public class CUS {
         // ------------------------------------------------------------------ //
         vertx.setPeriodic(1000, id -> {
             long elapsed = System.currentTimeMillis() - lastReceived.get();
-
-            client.get(PORT, "localhost", "/api/status")
-                .send()
-                .onSuccess(res -> {
-                    String apiMode = res.bodyAsJsonObject().getString("mode");
-
-                    // UNCONNECTED wins when MQTT has been silent too long
-                    boolean timedOut = elapsed > TIMEOUT_MS;
-                    String targetMode = (timedOut || "UNCONNECTED".equals(apiMode))
-                            ? "UNCONNECTED" : apiMode;
-
-                    if (timedOut) {
-                        System.out.println("[MQTT] Status: unreachable ("
-                                + elapsed / 1000 + "s without data)");
-                    } else {
-                        System.out.println("[MQTT] Status: connected, mode=" + targetMode);
-                    }
-
-                    // Always send the target mode to Arduino so it stays in sync.
-                    // (Arduino ignores repeated identical commands harmlessly.)
-                    serialSend(finalSerialPort, targetMode);
-
-                    if (!currentMode[0].equals(targetMode)) {
-                        System.out.println("[SERIAL] Pushed mode to Arduino: "
-                                + currentMode[0] + " → " + targetMode);
-                        currentMode[0] = targetMode;
-                    }
-
-                    // --- FIX 4: in AUTOMATIC mode, CUS computes valve and sends
-                    //     it to both DataService AND Arduino via the serial command.
-                    //     (MANUAL valve is set by the frontend → /api/valve directly,
-                    //      and the Arduino reads it from its potentiometer locally.)
-                    if ("AUTOMATIC".equals(targetMode)) {
-                        client.get(PORT, "localhost", "/api/data")
-                            .send()
-                            .onSuccess(dataRes -> {
-                                io.vertx.core.json.JsonArray arr = dataRes.bodyAsJsonArray();
-                                if (arr == null || arr.isEmpty()) return;
-
-                                double level = arr.getJsonObject(0).getDouble("value");
-
-                                // Policy from request.md:
-                                //   level > L2 (e.g. 20 cm)  → valve 100%
-                                //   level > L1 (e.g. 40 cm)  → valve 50%  (closer = more full)
-                                //   otherwise                 → valve 0%
-                                // NOTE: sensor measures *distance* from top, so smaller = fuller.
-                                final double L1 = 40.0; // cm – adjust to your tank
-                                final double L2 = 20.0; // cm – adjust to your tank
-
-                                int autoValve;
-                                if (level <= L2) {
-                                    autoValve = 100;
-                                } else if (level <= L1) {
-                                    autoValve = 50;
-                                } else {
-                                    autoValve = 0;
-                                }
-
-                                // Persist so frontend can display it
-                                JsonObject valveBody = new JsonObject().put("percent", autoValve);
-                                client.post(PORT, "localhost", "/api/valve")
-                                        .sendJson(valveBody)
-                                        .onSuccess(r -> System.out.println("[HTTP] Valve (AUTO) " + autoValve + "% saved"))
-                                        .onFailure(err -> System.out.println("[HTTP] Valve save error: " + err.getMessage()));
-                            })
-                            .onFailure(err -> System.out.println("[HTTP] Failed to get data: " + err.getMessage()));
-                    }
-                })
-                .onFailure(err -> System.out.println("[HTTP] Failed to get status: " + err.getMessage()));
+            if (elapsed > TIMEOUT_MS) {
+                System.out.println("[MQTT] Status: unreachable (nessun dato da " + elapsed / 1000 + "s)");
+                if (isUnconnected.compareAndSet(false, true)) {
+                    serialService.sendMode("UNCONNECTED");
+                    currentMode = "UNCONNECTED";
+                }
+            } else {
+                System.out.println("[MQTT] Status: connected");
+                if (isUnconnected.compareAndSet(true, false)) {
+                    serialService.sendMode(currentMode);
+                }
+            }
         });
     }
 }
