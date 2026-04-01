@@ -28,7 +28,7 @@ Thumbs.db
 *.swp
 *.swo
 *~
-java/ControlUnitSubsystem/http-backend/target/classes/esiot/backend/CUS.class
-java/ControlUnitSubsystem/http-backend/target/classes/esiot/backend/CUS$1.class
-java/ControlUnitSubsystem/http-backend/target/classes/esiot/backend/DataPoint.class
-java/ControlUnitSubsystem/http-backend/target/classes/esiot/backend/DataService.class
+./java/ControlUnitSubsystem/http-backend/target/classes/esiot/backend/CUS.class
+./java/ControlUnitSubsystem/http-backend/target/classes/esiot/backend/CUS$1.class
+./java/ControlUnitSubsystem/http-backend/target/classes/esiot/backend/DataPoint.class
+./java/ControlUnitSubsystem/http-backend/target/classes/esiot/backend/DataService.class
