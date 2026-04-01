@@ -6,6 +6,7 @@ Context::Context()
   manual = false;
   unconnected = false;
   potValue = 0;
+  valvePercent = 0;
   currentDistance = 0.0;
 }
 
@@ -32,6 +33,14 @@ void Context::setUnconnected()
 void Context::setPotValue(float value)
 {
   potValue = value;
+}
+void Context::setValvePercent(int percent)
+{
+  valvePercent = percent;
+}
+int Context::getValvePercent()
+{
+  return valvePercent;
 }
 void Context::setCurrentDistance(float dist)
 {

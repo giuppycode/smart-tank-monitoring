@@ -19,6 +19,9 @@ public:
   void setPotValue(float value);
   float getPotValue();
 
+  void setValvePercent(int percent);
+  int getValvePercent();
+
   void setCurrentDistance(float dist);
   float getCurrentDistance();
 
@@ -27,6 +30,7 @@ private:
   bool manual;
   bool unconnected;
   float potValue;
+  int valvePercent;
   float currentDistance;
 };
 
