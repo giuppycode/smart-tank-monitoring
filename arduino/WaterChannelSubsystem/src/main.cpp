@@ -9,6 +9,7 @@
 
 #include "tasks/FSMController.h"
 #include "tasks/PotReader.h"
+#include "tasks/SerialTask.h"
 
 Scheduler sched;
 
@@ -35,6 +36,10 @@ void setup()
   Task *pPotReader = new PotReader(pWaterChannelPlatform->getPot(), pContext);
   pPotReader->init(200);
   sched.addTask(pPotReader);
+
+  Task *pSerialTask = new SerialTask(pContext);
+  pSerialTask->init(50);
+  sched.addTask(pSerialTask);
 
 #endif
 }
