@@ -25,6 +25,11 @@ void SerialTask::tick()
             pContext->setManual();
         else if (content.startsWith("UNCONNECTED"))
             pContext->setUnconnected();
+        else if (content.startsWith("VALVE:"))
+        {
+            int valve = content.substring(6).toInt();
+            pContext->setValvePercent(valve);
+        }
 
         delete msg;
     }
@@ -48,8 +53,8 @@ void SerialTask::tick()
         else
             statusMsg += "UNKNOWN";
 
-        float valve = pContext->getPotValue();
-        statusMsg += ",VALVE:" + String(int(valve));
+        int valve = pContext->getValvePercent();
+        statusMsg += ",VALVE:" + String(valve);
 
         MsgService.sendMsg(statusMsg);
     }
