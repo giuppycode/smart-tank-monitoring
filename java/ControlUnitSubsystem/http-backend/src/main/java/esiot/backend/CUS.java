@@ -7,7 +7,7 @@
  * - Monitora la connettività MQTT e segnala se i messaggi mancano per troppo tempo
  *
  * @author Laboratorio IoT
- * @version 1.1
+ * @version 1.2
  */
 package esiot.backend;
 
@@ -19,50 +19,26 @@ import org.eclipse.paho.client.mqttv3.MqttCallback;
 import org.eclipse.paho.client.mqttv3.MqttClient;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
 
-import com.fazecast.jSerialComm.SerialPort;
-import com.fazecast.jSerialComm.SerialPortDataListener;
-import com.fazecast.jSerialComm.SerialPortEvent;
-
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.web.client.WebClient;
 import io.vertx.core.eventbus.EventBus;
 
-/**
- * Classe principale del Control Unit Subsystem.
- * Gestisce la comunicazione MQTT, seriale e l'API HTTP per i dati dei sensori.
- */
 public class CUS {
-    /** Porta HTTP su cui il server Vert.x ascolta */
     static final int PORT = 8080;
-
-    /** Indirizzo del broker MQTT a cui connettersi */
     static final String BROKER = "tcp://broker.mqtt-dashboard.com";
-
-    /** Topic MQTT a cui sottoscriversi per ricevere i dati */
     static final String TOPIC = "esiot-2025";
-
-    /** Timeout in millisecondi per considerare il sensore non raggiungibile */
     static final long TIMEOUT_MS = 3000;
     
-    /** Serial service for communicating with WCS */
     static SerialService serialService;
-    
-    /** Current mode for serial communication */
     static String currentMode = "AUTOMATIC";
-
-    /**
-     * Invia una stringa sulla porta seriale in modo sicuro (lunghezza calcolata
-     * a runtime, mai hardcoded).
-     */
-    private static void serialSend(SerialPort port, String msg) {
-        byte[] bytes = (msg + "\n").getBytes();
-        port.writeBytes(bytes, bytes.length);
-    }
 
     public static void main(String[] args) throws Exception {
         serialService = new SerialService();
-        serialService.connect();
+        if (!serialService.connect()) {
+            System.out.println("[SERIAL] Failed to connect, exiting.");
+            return;
+        }
         
         Vertx vertx = Vertx.vertx();
         DataService service = new DataService(PORT);
@@ -72,9 +48,9 @@ public class CUS {
         eb.consumer("serial.commands", message -> {
             JsonObject msg = (JsonObject) message.body();
             String type = msg.getString("type");
-            String value = msg.getString("value");
             
             if ("mode".equals(type)) {
+                String value = msg.getString("value");
                 serialService.sendMode(value);
                 currentMode = value;
                 System.out.println("[EVENTBUS] Mode command: " + value);
@@ -87,7 +63,6 @@ public class CUS {
 
         WebClient client = WebClient.create(vertx);
 
-        // Timestamp dell'ultimo messaggio MQTT ricevuto
         AtomicLong lastReceived = new AtomicLong(System.currentTimeMillis());
         AtomicBoolean isUnconnected = new AtomicBoolean(false);
 
@@ -135,123 +110,56 @@ public class CUS {
         mqtt.subscribe(TOPIC, 1);
         System.out.println("[MQTT] Iscritto al topic: " + TOPIC);
 
+        serialService.sendMode("AUTOMATIC");
+        System.out.println("[SERIAL] Stato iniziale inviato: AUTOMATIC");
+
         // ------------------------------------------------------------------ //
-        //  SERIAL – ricerca porta Arduino
+        //  Serial message polling - processes STATE:MODE,PERCENT messages
         // ------------------------------------------------------------------ //
-        SerialPort serialPort = null;
-        for (SerialPort port : SerialPort.getCommPorts()) {
-            System.out.println("[SERIAL] Trovata porta: " + port.getSystemPortName());
-            if (port.getSystemPortName().contains("USB") || port.getSystemPortName().contains("ACM")) {
-                serialPort = port;
-                break;
-            }
-        }
+        vertx.setPeriodic(100, id -> {
+            while (serialService.hasMessages()) {
+                String msg = serialService.pollMessage();
+                if (msg != null && msg.startsWith("STATE:")) {
+                    String payload = msg.substring(6);
+                    String[] parts = payload.split(",");
+                    if (parts.length >= 2) {
+                        String arduinoMode = parts[0].trim();
+                        String valveStr = parts[1].trim();
 
-        if (serialPort == null) {
-            SerialPort[] all = SerialPort.getCommPorts();
-            if (all.length == 0) {
-                System.out.println("[SERIAL] ERRORE: nessuna porta seriale disponibile.");
-                return;
-            }
-            System.out.println("[SERIAL] Nessuna porta USB/ACM trovata, uso la prima disponibile.");
-            serialPort = all[0];
-        }
+                        int valve;
+                        try {
+                            valve = Integer.parseInt(valveStr);
+                        } catch (NumberFormatException e) {
+                            continue;
+                        }
 
-        final SerialPort finalSerialPort = serialPort;
-        serialPort.setComPortParameters(9600, 8, 1, 0);
-        serialPort.setComPortTimeouts(SerialPort.TIMEOUT_READ_SEMI_BLOCKING, 0, 0);
-        serialPort.openPort();
+                        // Mode propagation: Arduino button toggles MANUAL on/off
+                        if (!arduinoMode.equals(currentMode)) {
+                            System.out.println("[SERIAL] Mode changed by Arduino: " + currentMode + " → " + arduinoMode);
+                            currentMode = arduinoMode;
 
-        // currentMode tracks what we last sent/received so we avoid redundant
-        // serial writes. It is only written from the Vert.x event loop OR from
-        // the serial listener – both are effectively single-threaded in this
-        // setup, so a plain array cell is fine.
-        final String[] currentMode = {"AUTOMATIC"};
+                            JsonObject modeBody = new JsonObject().put("mode", arduinoMode);
+                            client.post(PORT, "localhost", "/api/status")
+                                    .sendJson(modeBody)
+                                    .onSuccess(r -> System.out.println("[HTTP] Mode synced to DataService: " + arduinoMode))
+                                    .onFailure(err -> System.out.println("[HTTP] Mode sync error: " + err.getMessage()));
+                        }
 
-        StringBuilder serialBuffer = new StringBuilder();
-
-        serialPort.addDataListener(new SerialPortDataListener() {
-            @Override
-            public int getListeningEvents() {
-                return SerialPort.LISTENING_EVENT_DATA_AVAILABLE;
-            }
-
-            @Override
-            public void serialEvent(SerialPortEvent event) {
-                if (event.getEventType() != SerialPort.LISTENING_EVENT_DATA_AVAILABLE) return;
-
-                int available = finalSerialPort.bytesAvailable();
-                if (available <= 0) return;
-
-                byte[] readBuffer = new byte[available];
-                int numRead = finalSerialPort.readBytes(readBuffer, readBuffer.length);
-                serialBuffer.append(new String(readBuffer, 0, numRead));
-
-                int newlineIndex;
-                while ((newlineIndex = serialBuffer.indexOf("\n")) != -1) {
-                    String line = serialBuffer.substring(0, newlineIndex).trim();
-                    serialBuffer.delete(0, newlineIndex + 1);
-
-                    if (line.isEmpty()) continue;
-                    System.out.println("[SERIAL] Ricevuto: " + line);
-
-                    // Expected format: "MANUAL,VALVE:75" / "AUTOMATIC,VALVE:0" / "UNCONNECTED,VALVE:0"
-                    if (!line.contains(",")) continue;
-
-                    String[] parts = line.split(",", 2);
-                    if (parts.length < 2 || !parts[1].startsWith("VALVE:")) continue;
-
-                    String arduinoMode = parts[0].trim();
-                    String valveStr   = parts[1].substring(6).trim();
-
-                    // --- Parse valve value ---
-                    int valve;
-                    try {
-                        valve = Integer.parseInt(valveStr);
-                    } catch (NumberFormatException e) {
-                        System.out.println("[SERIAL] Valore valvola non valido: " + valveStr);
-                        continue;
-                    }
-
-                    // --- FIX 1: propagate Arduino mode change → DataService → frontend ---
-                    // The Arduino button can toggle MANUAL on/off. When it does, we must
-                    // POST the new mode to /api/status so the frontend reflects it.
-                    if (!arduinoMode.equals(currentMode[0])) {
-                        System.out.println("[SERIAL] Mode changed by Arduino: "
-                                + currentMode[0] + " → " + arduinoMode);
-                        currentMode[0] = arduinoMode;
-
-                        JsonObject modeBody = new JsonObject().put("mode", arduinoMode);
-                        client.post(PORT, "localhost", "/api/status")
-                                .sendJson(modeBody)
-                                .onSuccess(r -> System.out.println("[HTTP] Mode synced to DataService: " + arduinoMode))
-                                .onFailure(err -> System.out.println("[HTTP] Mode sync error: " + err.getMessage()));
-                    }
-
-                    // --- FIX 2: update valve in DataService, but ONLY when in MANUAL mode ---
-                    // In AUTOMATIC/UNCONNECTED the CUS owns the valve value; the potentiometer
-                    // reading from the Arduino should be ignored so the frontend is not
-                    // confused by stale pot values.
-                    if ("MANUAL".equals(arduinoMode)) {
-                        JsonObject valveBody = new JsonObject().put("percent", valve);
-                        client.post(PORT, "localhost", "/api/valve")
-                                .sendJson(valveBody)
-                                .onSuccess(r -> System.out.println("[HTTP] Valve (MANUAL) " + valve + "% saved"))
-                                .onFailure(err -> System.out.println("[HTTP] Valve save error: " + err.getMessage()));
+                        // Valve update: only propagate in MANUAL mode
+                        if ("MANUAL".equals(arduinoMode)) {
+                            JsonObject valveBody = new JsonObject().put("percent", valve);
+                            client.post(PORT, "localhost", "/api/valve")
+                                    .sendJson(valveBody)
+                                    .onSuccess(r -> System.out.println("[HTTP] Valve (MANUAL) " + valve + "% saved"))
+                                    .onFailure(err -> System.out.println("[HTTP] Valve save error: " + err.getMessage()));
+                        }
                     }
                 }
             }
         });
 
-        System.out.println("[SERIAL] Connesso a: " + finalSerialPort.getSystemPortName());
-
-        // FIX 3: use the helper so the byte-count is always correct
-        serialSend(finalSerialPort, "AUTOMATIC");
-        System.out.println("[SERIAL] Stato iniziale inviato: AUTOMATIC");
-
         // ------------------------------------------------------------------ //
-        //  Periodic timer – polls DataService and pushes correct mode/valve
-        //  to Arduino every second.
+        //  Periodic timer - MQTT connectivity check
         // ------------------------------------------------------------------ //
         vertx.setPeriodic(1000, id -> {
             long elapsed = System.currentTimeMillis() - lastReceived.get();
