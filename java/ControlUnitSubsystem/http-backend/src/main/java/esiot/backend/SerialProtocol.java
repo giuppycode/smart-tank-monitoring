@@ -1,109 +1,174 @@
 package esiot.backend;
 
-import com.fazecast.jSerialComm.SerialPort;
-import com.fazecast.jSerialComm.SerialPortDataListener;
-import com.fazecast.jSerialComm.SerialPortEvent;
+import jssc.SerialPort;
+import jssc.SerialPortEvent;
+import jssc.SerialPortEventListener;
+import jssc.SerialPortException;
+import jssc.SerialPortList;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 
-public class SerialProtocol {
+public class SerialProtocol implements SerialPortEventListener {
     private SerialPort serialPort;
     private final String[] currentMode = {"AUTOMATIC"};
-    private final StringBuilder serialBuffer = new StringBuilder();
+    private final BlockingQueue<String> messageQueue = new LinkedBlockingQueue<>();
+    private SerialCallback callback;
+    private boolean initialized = false;
 
     public SerialProtocol() {}
 
     public void initialize(SerialCallback callback) {
-        final SerialPort[] serialPortHolder = new SerialPort[1];
-        for (SerialPort port : SerialPort.getCommPorts()) {
-            System.out.println("[SERIAL] Trovata porta: " + port.getSystemPortName());
-            if (port.getSystemPortName().contains("USB") || port.getSystemPortName().contains("ACM")) {
-                serialPortHolder[0] = port;
+        this.callback = callback;
+
+        String[] ports = SerialPortList.getPortNames();
+        String selectedPort = null;
+
+        for (String portName : ports) {
+            System.out.println("[SERIAL] Found port: " + portName);
+            if (portName.contains("USB") || portName.contains("ACM") || portName.contains("cu.")) {
+                selectedPort = portName;
                 break;
             }
         }
 
-        if (serialPortHolder[0] == null) {
-            SerialPort[] all = SerialPort.getCommPorts();
-            if (all.length == 0) {
-                System.out.println("[SERIAL] ERRORE: nessuna porta seriale disponibile.");
+        if (selectedPort == null) {
+            if (ports.length > 0) {
+                selectedPort = ports[0];
+                System.out.println("[SERIAL] No USB/ACM port found, using: " + selectedPort);
+            } else {
+                System.out.println("[SERIAL] ERROR: No serial ports available.");
                 return;
             }
-            System.out.println("[SERIAL] Nessuna porta USB/ACM trovata, uso la prima disponibile.");
-            serialPortHolder[0] = all[0];
         }
 
-        this.serialPort = serialPortHolder[0];
-        serialPort.setComPortParameters(9600, 8, 1, 0);
-        serialPort.setComPortTimeouts(SerialPort.TIMEOUT_READ_SEMI_BLOCKING, 0, 0);
-        serialPort.openPort();
+        this.serialPort = new SerialPort(selectedPort);
 
-        final SerialPort finalPort = serialPort;
-        serialPort.addDataListener(new SerialPortDataListener() {
-            @Override
-            public int getListeningEvents() {
-                return SerialPort.LISTENING_EVENT_DATA_AVAILABLE;
-            }
+        try {
+            serialPort.openPort();
+            serialPort.setParams(
+                SerialPort.BAUDRATE_115200,
+                SerialPort.DATABITS_8,
+                SerialPort.STOPBITS_1,
+                SerialPort.PARITY_NONE
+            );
+            // Disable flow control - not supported on most USB-Serial adapters
 
-            @Override
-            public void serialEvent(SerialPortEvent event) {
-                if (event.getEventType() != SerialPort.LISTENING_EVENT_DATA_AVAILABLE) return;
+            serialPort.addEventListener(this);
+            initialized = true;
 
-                int available = finalPort.bytesAvailable();
-                if (available <= 0) return;
+            System.out.println("[SERIAL] Connected to: " + serialPort.getPortName());
 
-                byte[] readBuffer = new byte[available];
-                int numRead = finalPort.readBytes(readBuffer, readBuffer.length);
-                serialBuffer.append(new String(readBuffer, 0, numRead));
+            new Thread(new MessageProcessor()).start();
 
-                int newlineIndex;
-                while ((newlineIndex = serialBuffer.indexOf("\n")) != -1) {
-                    String line = serialBuffer.substring(0, newlineIndex).trim();
-                    serialBuffer.delete(0, newlineIndex + 1);
+        } catch (SerialPortException e) {
+            System.out.println("[SERIAL] Error opening port: " + e.getMessage());
+        }
+    }
 
-                    if (line.isEmpty()) continue;
-                    System.out.println("[SERIAL] Ricevuto: " + line);
-
-                    if (!line.contains(",")) continue;
-
-                    String[] parts = line.split(",", 2);
-                    if (parts.length < 2 || !parts[1].startsWith("VALVE:")) continue;
-
-                    String arduinoMode = parts[0].trim();
-                    String valveStr   = parts[1].substring(6).trim();
-
-                    int valve;
-                    try {
-                        valve = Integer.parseInt(valveStr);
-                    } catch (NumberFormatException e) {
-                        System.out.println("[SERIAL] Valore valvola non valido: " + valveStr);
-                        continue;
-                    }
-
-                    if (!arduinoMode.equals(currentMode[0])) {
-                        System.out.println("[SERIAL] Mode changed by Arduino: "
-                                + currentMode[0] + " → " + arduinoMode);
-                        currentMode[0] = arduinoMode;
-                        callback.onModeChanged(arduinoMode);
-                    }
-
-                    if ("MANUAL".equals(arduinoMode)) {
-                        callback.onValveChanged(valve);
+    @Override
+    public void serialEvent(SerialPortEvent event) {
+        if (event.isRXCHAR() && event.getEventValue() > 0) {
+            try {
+                String data = serialPort.readString(event.getEventValue());
+                if (data != null) {
+                    StringBuilder sb = new StringBuilder();
+                    for (char c : data.toCharArray()) {
+                        if (c == '\n' || c == '\r') {
+                            if (sb.length() > 0) {
+                                messageQueue.offer(sb.toString());
+                                sb.setLength(0);
+                            }
+                        } else {
+                            sb.append(c);
+                        }
                     }
                 }
+            } catch (SerialPortException e) {
+                System.out.println("[SERIAL] Read error: " + e.getMessage());
             }
-        });
+        }
+    }
 
-        System.out.println("[SERIAL] Connesso a: " + serialPort.getSystemPortName());
+    private class MessageProcessor implements Runnable {
+        @Override
+        public void run() {
+            while (true) {
+                try {
+                    String line = messageQueue.take();
+                    processMessage(line);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+    }
+
+    private void processMessage(String line) {
+        line = line.trim();
+        if (line.isEmpty()) return;
+
+        System.out.println("[SERIAL] Received: " + line);
+
+        if (!line.contains(",")) return;
+
+        String[] parts = line.split(",", 2);
+        if (parts.length < 2 || !parts[1].startsWith("VALVE:")) return;
+
+        String arduinoMode = parts[0].trim();
+        String valveStr = parts[1].substring(6).trim();
+
+        int valve;
+        try {
+            valve = Integer.parseInt(valveStr);
+        } catch (NumberFormatException e) {
+            System.out.println("[SERIAL] Invalid valve value: " + valveStr);
+            return;
+        }
+
+        if (!arduinoMode.equals(currentMode[0])) {
+            System.out.println("[SERIAL] Mode changed by Arduino: " + currentMode[0] + " -> " + arduinoMode);
+            currentMode[0] = arduinoMode;
+            callback.onModeChanged(arduinoMode);
+        }
+
+        if ("MANUAL".equals(arduinoMode)) {
+            callback.onValveChanged(valve);
+        }
     }
 
     public void sendMode(String mode) {
-        if (serialPort == null || !serialPort.isOpen()) return;
-        byte[] bytes = (mode + "\n").getBytes();
-        serialPort.writeBytes(bytes, bytes.length);
-        System.out.println("[SERIAL] Stato iniziale inviato: " + mode);
+        if (serialPort == null || !serialPort.isOpened()) {
+            System.out.println("[SERIAL] Port not open, cannot send mode");
+            return;
+        }
+        try {
+            serialPort.writeString(mode + "\n");
+            System.out.println("[SERIAL] Sent mode: " + mode);
+        } catch (SerialPortException e) {
+            System.out.println("[SERIAL] Write error: " + e.getMessage());
+        }
+    }
+
+    public void sendValve(int percent) {
+        if (serialPort == null || !serialPort.isOpened()) {
+            System.out.println("[SERIAL] Port not open, cannot send valve");
+            return;
+        }
+        try {
+            serialPort.writeString("VALVE:" + percent + "\n");
+            System.out.println("[SERIAL] Sent valve: " + percent);
+        } catch (SerialPortException e) {
+            System.out.println("[SERIAL] Write error: " + e.getMessage());
+        }
     }
 
     public String getCurrentMode() {
         return currentMode[0];
+    }
+
+    public boolean isInitialized() {
+        return initialized;
     }
 
     public interface SerialCallback {
