@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include "kernel/Task.h"
+#include "kernel/MsgService.h"
 #include "model/Context.h"
 #include "devices/DisplayLcd.h"
 #include "devices/ValveMotor.h"
@@ -25,6 +26,7 @@ private:
     void setState(PotentiometerState newState);
     long elapsedTimeInState();
     void log(const String &msg);
+    void sendValveToCUS(int percent);
 
     bool checkAndSetJustEntered();
 
@@ -33,6 +35,8 @@ private:
     long stateTimestamp;
     bool justEntered;
     unsigned long conditionStartTime;
+
+    float lastPotValue;
 
     Potentiometer *pPot;
     Context *pContext;

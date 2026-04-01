@@ -19,6 +19,8 @@ FSMController::FSMController(DisplayLcd *pDisplay, ValveMotor *pValveMotor, Pote
 
 void FSMController::tick()
 {
+    handleIncomingMessage();
+
     switch (state)
     {
     case AUTOMATIC:
@@ -33,6 +35,7 @@ void FSMController::tick()
             if (pButton->isPressed())
             {
                 setState(MANUAL);
+                sendModeToCUS("MANUAL");
             }
 
             float currentDistance = pContext->getCurrentDistance();
@@ -72,6 +75,7 @@ void FSMController::tick()
             if (pButton->isPressed())
             {
                 setState(AUTOMATIC);
+                sendModeToCUS("AUTOMATIC");
             }
             float potValue = pContext->getPotValue();
             int angle = (int)((1.0 - potValue) * 90); // Inverted: 0% pot = 90° (closed), 100% pot = 0° (open)
@@ -106,6 +110,85 @@ void FSMController::tick()
     }
 }
 
+void FSMController::handleIncomingMessage()
+{
+    if (MsgService.isMsgAvailable())
+    {
+        Msg *msg = MsgService.receiveMsg();
+        String content = msg->getContent();
+        
+        Logger.log("[FSM] Received: " + content);
+
+        if (content.startsWith("MODE:"))
+        {
+            String mode = content.substring(5);
+            if (mode.equals("MANUAL"))
+            {
+                if (state != MANUAL)
+                {
+                    setState(MANUAL);
+                }
+            }
+            else if (mode.equals("AUTOMATIC"))
+            {
+                if (state != AUTOMATIC)
+                {
+                    setState(AUTOMATIC);
+                }
+            }
+        }
+        else if (content.startsWith("VALVE:"))
+        {
+            String val = content.substring(6);
+            int percent = val.toInt();
+            if (percent >= 0 && percent <= 100)
+            {
+                applyValveFromCUS(percent);
+            }
+        }
+        
+        delete msg;
+    }
+}
+
+void FSMController::sendModeToCUS(const String &mode)
+{
+    MsgService.sendMsg("MODE:" + mode);
+    Logger.log("[FSM] Sent MODE to CUS: " + mode);
+}
+
+void FSMController::applyValveFromCUS(int percent)
+{
+    if (state == MANUAL)
+    {
+        float potValue = (float)percent / 100.0;
+        pContext->setPotValue(potValue);
+        
+        int angle = (int)((1.0 - potValue) * 90);
+        pValveMotor->manuallySetAngle(angle);
+        
+        pDisplay->showModeAndPercentage("MANUAL", percent);
+        Logger.log("[FSM] Valve set from CUS: " + String(percent) + "%");
+    }
+    else if (state == AUTOMATIC)
+    {
+        if (percent == 50)
+        {
+            pValveMotor->half();
+        }
+        else if (percent == 100)
+        {
+            pValveMotor->open();
+        }
+        else
+        {
+            pValveMotor->close();
+        }
+        pDisplay->showModeAndPercentage("AUTOMATIC", percent);
+        Logger.log("[FSM] Valve set from CUS (auto): " + String(percent) + "%");
+    }
+}
+
 void FSMController::setState(ControllerState newState)
 {
     state = newState;
@@ -126,4 +209,9 @@ bool FSMController::checkAndSetJustEntered()
         justEntered = false;
     }
     return bak;
+}
+
+void FSMController::log(const String &msg)
+{
+    Logger.log(msg);
 }

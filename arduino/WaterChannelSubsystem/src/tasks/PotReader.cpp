@@ -7,6 +7,7 @@ PotReader::PotReader(Potentiometer *pPot, Context *pContext)
     this->pPot = pPot;
     this->pContext = pContext;
     this->conditionStartTime = 0;
+    this->lastPotValue = -1.0;  // Initialize to invalid value to force first update
     setState(IDLE);
 }
 
@@ -18,6 +19,7 @@ void PotReader::tick()
         if (pContext->isManual())
         {
             setState(READING);
+            lastPotValue = -1.0;  // Reset to force first send
         }
         break;
 
@@ -25,8 +27,17 @@ void PotReader::tick()
         if (pContext->isManual())
         {
             pPot->sync();
-            // qui mi implemneto la conversione da pot a int dei gradi motore
-            pContext->setPotValue(pPot->getValue()); // Converti il valore, non credo vada bene pero serve float
+            float potValue = pPot->getValue();
+            pContext->setPotValue(potValue);
+            
+            int percentage = (int)(potValue * 100);
+            
+            // Send to CUS only if value changed significantly (threshold of 2%)
+            if (lastPotValue < 0 || abs(potValue - lastPotValue) > 0.02)
+            {
+                sendValveToCUS(percentage);
+                lastPotValue = potValue;
+            }
         }
         else if (pContext->isAutomatic())
         {
@@ -34,6 +45,13 @@ void PotReader::tick()
         }
     }
 }
+
+void PotReader::sendValveToCUS(int percent)
+{
+    MsgService.sendMsg("VALVE:" + String(percent));
+    Logger.log("[PotReader] Sent VALVE to CUS: " + String(percent) + "%");
+}
+
 void PotReader::setState(PotentiometerState newState)
 {
     state = newState;
@@ -54,4 +72,9 @@ bool PotReader::checkAndSetJustEntered()
         justEntered = false;
     }
     return bak;
+}
+
+void PotReader::log(const String &msg)
+{
+    Logger.log(msg);
 }

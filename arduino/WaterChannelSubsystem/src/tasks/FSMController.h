@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include "kernel/Task.h"
+#include "kernel/MsgService.h"
 #include "model/Context.h"
 #include "devices/DisplayLcd.h"
 #include "devices/ValveMotor.h"
@@ -27,6 +28,9 @@ private:
   void setState(ControllerState newState);
   long elapsedTimeInState();
   void log(const String &msg);
+  void handleIncomingMessage();
+  void sendModeToCUS(const String &mode);
+  void applyValveFromCUS(int percent);
 
   bool checkAndSetJustEntered();
 
