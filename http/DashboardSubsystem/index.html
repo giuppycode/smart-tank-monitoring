@@ -53,17 +53,16 @@
       <div class="card">
         <div class="card-label">Controls</div>
         <div class="controls">
-          <button class="btn btn-auto" onclick="setMode('AUTOMATIC')">
+          <button id="btnAuto" class="btn btn-auto" onclick="setMode('AUTOMATIC')">
             ▶ Set Automatic
           </button>
-          <button class="btn btn-manual" onclick="setMode('MANUAL')">
+          <button id="btnManual" class="btn btn-manual" onclick="setMode('MANUAL')">
             ✎ Set Manual
           </button>
 
           <div
             class="slider-wrap"
             id="sliderWrap"
-            style="opacity: 0.3; pointer-events: none"
           >
             <label>VALVE CONTROL (MANUAL ONLY)</label>
             <input
@@ -75,7 +74,6 @@
               oninput="updateSliderValue(this)"
             />
             <div class="slider-value" id="sliderValue">0%</div>
-            <button class="btn send-btn" onclick="sendValve()">↑ Send</button>
           </div>
         </div>
 

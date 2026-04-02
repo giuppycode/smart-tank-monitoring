@@ -261,6 +261,14 @@ header {
   background: rgba(255, 184, 0, 0.1);
 }
 
+.btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.btn:disabled:hover {
+  background: transparent;
+}
+
 .slider-wrap {
   margin-top: 4px;
 }

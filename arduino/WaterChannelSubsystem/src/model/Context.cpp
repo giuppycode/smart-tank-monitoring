@@ -6,6 +6,8 @@ Context::Context()
   manual = false;
   unconnected = false;
   potValue = 0;
+  targetValveFromDBS = 0;
+  dbsControlActive = false;
   currentDistance = 0.0;
 }
 
@@ -56,6 +58,26 @@ bool Context::isUnconnected()
 float Context::getPotValue()
 {
   return potValue;
+}
+
+void Context::setTargetValveFromDBS(float value)
+{
+  targetValveFromDBS = value;
+}
+
+float Context::getTargetValveFromDBS()
+{
+  return targetValveFromDBS;
+}
+
+void Context::setDBSControlActive(bool active)
+{
+  dbsControlActive = active;
+}
+
+bool Context::isDBSControlActive()
+{
+  return dbsControlActive;
 }
 
 float Context::getCurrentDistance()

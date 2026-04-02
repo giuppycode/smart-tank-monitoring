@@ -4,12 +4,14 @@ import java.util.Date;
 import java.util.LinkedList;
 
 import io.vertx.core.AbstractVerticle;
+import io.vertx.core.http.HttpMethod;
 import io.vertx.core.http.HttpServerResponse;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
 import io.vertx.ext.web.handler.BodyHandler;
+import io.vertx.ext.web.handler.CorsHandler;
 
 /*
  * Data Service as a vertx event-loop 
@@ -23,15 +25,41 @@ public class DataService extends AbstractVerticle {
 	private String mode = "AUTOMATIC";
 	private float valvePercent = 0;
 	private long lastReceived = System.currentTimeMillis();
+	private WCSService wcsService;
 	
 	public DataService(int port) {
 		values = new LinkedList<>();		
 		this.port = port;
 	}
 
+	public void setWCSService(WCSService wcsService) {
+		this.wcsService = wcsService;
+	}
+
+	public void setMode(String mode) {
+		this.mode = mode;
+		log("Mode updated to: " + mode);
+	}
+
+	public String getMode() {
+		return mode;
+	}
+
+	public void setValvePercent(float percent) {
+		this.valvePercent = percent;
+		log("Valve percent updated to: " + percent);
+	}
+
 	@Override
 	public void start() {		
 		Router router = Router.router(vertx);
+		
+		router.route().handler(CorsHandler.create("*")
+				.allowedMethod(HttpMethod.GET)
+				.allowedMethod(HttpMethod.POST)
+				.allowedMethod(HttpMethod.OPTIONS)
+				.allowedHeader("Content-Type"));
+		
 		router.route().handler(BodyHandler.create());
 		router.post("/api/data").handler(this::handleAddNewData);
 		router.get("/api/data").handler(this::handleGetData);	
@@ -96,7 +124,7 @@ public class DataService extends AbstractVerticle {
 	private void handleGetStatus(RoutingContext ctx) {
     JsonObject obj = new JsonObject();
     String effectiveMode = mode;
-    if (System.currentTimeMillis() - lastReceived > TIMEOUT_MS) {
+    if (mode.equals("AUTOMATIC") && System.currentTimeMillis() - lastReceived > TIMEOUT_MS) {
         effectiveMode = "UNCONNECTED";
     }
     obj.put("mode", effectiveMode);
@@ -109,8 +137,14 @@ public class DataService extends AbstractVerticle {
 private void handleSetStatus(RoutingContext ctx) {
     JsonObject body = ctx.getBodyAsJson();
     if (body == null) { sendError(400, ctx.response()); return; }
-    mode = body.getString("mode", mode);
-    log("Mode changed to: " + mode);
+    String newMode = body.getString("mode", mode);
+    if (!newMode.equals(mode)) {
+        mode = newMode;
+        log("Mode changed to: " + mode);
+        if (wcsService != null) {
+            wcsService.sendMode(mode);
+        }
+    }
     ctx.response().putHeader("Access-Control-Allow-Origin", "*")
        .setStatusCode(200).end();
 }
@@ -129,6 +163,9 @@ private void handleSetValve(RoutingContext ctx) {
     if (body == null) { sendError(400, ctx.response()); return; }
     valvePercent = body.getFloat("percent", valvePercent);
     log("Valve set to: " + valvePercent + "%");
+    if (wcsService != null) {
+        wcsService.sendValve((int) valvePercent);
+    }
     ctx.response().putHeader("Access-Control-Allow-Origin", "*")
        .setStatusCode(200).end();
 }
