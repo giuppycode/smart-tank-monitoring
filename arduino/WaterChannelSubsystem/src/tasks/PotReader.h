@@ -13,7 +13,7 @@ class PotReader : public Task
 {
 
 public:
-    PotReader(Potentiometer *pPot, Context *pContext);
+    PotReader(Potentiometer *pPot, ValveMotor *pValveMotor, Context *pContext);
     void tick();
 
 private:
@@ -27,6 +27,7 @@ private:
     long elapsedTimeInState();
     void log(const String &msg);
     void sendValveToCUS(int percent);
+    void moveMotorToPot();
 
     bool checkAndSetJustEntered();
 
@@ -39,6 +40,7 @@ private:
     float lastPotValue;
 
     Potentiometer *pPot;
+    ValveMotor *pValveMotor;
     Context *pContext;
 };
 

@@ -1,13 +1,17 @@
 #include "PotReader.h"
 #include <Arduino.h>
+#include <stdlib.h>
 #include "kernel/Logger.h"
 
-PotReader::PotReader(Potentiometer *pPot, Context *pContext)
+#define PICKUP_THRESHOLD 0.02
+
+PotReader::PotReader(Potentiometer *pPot, ValveMotor *pValveMotor, Context *pContext)
 {
     this->pPot = pPot;
+    this->pValveMotor = pValveMotor;
     this->pContext = pContext;
     this->conditionStartTime = 0;
-    this->lastPotValue = -1.0;  // Initialize to invalid value to force first update
+    this->lastPotValue = -1.0;
     setState(IDLE);
 }
 
@@ -19,7 +23,7 @@ void PotReader::tick()
         if (pContext->isManual())
         {
             setState(READING);
-            lastPotValue = -1.0;  // Reset to force first send
+            lastPotValue = -1.0;
         }
         break;
 
@@ -30,13 +34,27 @@ void PotReader::tick()
             float potValue = pPot->getValue();
             pContext->setPotValue(potValue);
             
-            int percentage = (int)(potValue * 100);
-            
-            // Send to CUS only if value changed significantly (threshold of 2%)
-            if (lastPotValue < 0 || abs(potValue - lastPotValue) > 0.02)
+            if (pContext->isDBSControlActive())
             {
-                sendValveToCUS(percentage);
-                lastPotValue = potValue;
+                float target = pContext->getTargetValveFromDBS();
+                if (abs(potValue - target) <= PICKUP_THRESHOLD)
+                {
+                    pContext->setDBSControlActive(false);
+                    moveMotorToPot();
+                    int percentage = (int)(potValue * 100);
+                    sendValveToCUS(percentage);
+                    lastPotValue = potValue;
+                    Logger.log("[PotReader] DBS control taken over by pot");
+                }
+            }
+            else
+            {
+                int percentage = (int)(potValue * 100);
+                if (lastPotValue < 0 || abs(potValue - lastPotValue) > 0.02)
+                {
+                    sendValveToCUS(percentage);
+                    lastPotValue = potValue;
+                }
             }
         }
         else if (pContext->isAutomatic())
@@ -44,6 +62,13 @@ void PotReader::tick()
             setState(IDLE);
         }
     }
+}
+
+void PotReader::moveMotorToPot()
+{
+    float potValue = pPot->getValue();
+    int angle = (int)((1.0 - potValue) * 90);
+    pValveMotor->manuallySetAngle(angle);
 }
 
 void PotReader::sendValveToCUS(int percent)

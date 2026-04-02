@@ -32,7 +32,7 @@ void setup()
   pFSMController->init(75);
   sched.addTask(pFSMController);
 
-  Task *pPotReader = new PotReader(pWaterChannelPlatform->getPot(), pContext);
+  Task *pPotReader = new PotReader(pWaterChannelPlatform->getPot(), pWaterChannelPlatform->getValveMotor(), pContext);
   pPotReader->init(200);
   sched.addTask(pPotReader);
 
