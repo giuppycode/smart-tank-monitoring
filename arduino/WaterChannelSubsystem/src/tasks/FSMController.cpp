@@ -1,9 +1,11 @@
 #include "FSMController.h"
 #include <Arduino.h>
+#include <stdlib.h>
 #include "kernel/Logger.h"
 
 #define L1 0.20
 #define L2 0.30
+#define PICKUP_THRESHOLD 0.02
 
 FSMController::FSMController(DisplayLcd *pDisplay, ValveMotor *pValveMotor, Potentiometer *pPot, Button *pButton, Context *pContext)
 {
@@ -71,6 +73,7 @@ void FSMController::tick()
             if (this->checkAndSetJustEntered())
             {
                 Logger.log("[FSM] Entered MANUAL");
+                pContext->setDBSControlActive(false);
             }
             if (pButton->isPressed())
             {
@@ -78,11 +81,23 @@ void FSMController::tick()
                 sendModeToCUS("AUTOMATIC");
             }
             float potValue = pContext->getPotValue();
-            int angle = (int)((1.0 - potValue) * 90); // Inverted: 0% pot = 90° (closed), 100% pot = 0° (open)
-            int percentage = (int)(potValue * 100); // potValue 0-1 maps to 0-100%
-
-            pValveMotor->manuallySetAngle(angle);
-            pDisplay->showModeAndPercentage("MANUAL", percentage);
+            
+            if (pContext->isDBSControlActive())
+            {
+                float target = pContext->getTargetValveFromDBS();
+                if (abs(potValue - target) <= PICKUP_THRESHOLD)
+                {
+                    pContext->setDBSControlActive(false);
+                    Logger.log("[FSM] Pot picked up DBS control");
+                }
+            }
+            else
+            {
+                int angle = (int)((1.0 - potValue) * 90);
+                int percentage = (int)(potValue * 100);
+                pValveMotor->manuallySetAngle(angle);
+                pDisplay->showModeAndPercentage("MANUAL", percentage);
+            }
         }
         else
         {
@@ -159,16 +174,15 @@ void FSMController::sendModeToCUS(const String &mode)
 
 void FSMController::applyValveFromCUS(int percent)
 {
+    float potValue = (float)percent / 100.0;
+    
     if (state == MANUAL)
     {
-        float potValue = (float)percent / 100.0;
-        pContext->setPotValue(potValue);
-        
-        int angle = (int)((1.0 - potValue) * 90);
-        pValveMotor->manuallySetAngle(angle);
+        pContext->setTargetValveFromDBS(potValue);
+        pContext->setDBSControlActive(true);
         
         pDisplay->showModeAndPercentage("MANUAL", percent);
-        Logger.log("[FSM] Valve set from CUS: " + String(percent) + "%");
+        Logger.log("[FSM] Valve set from CUS: " + String(percent) + "% (waiting for pot pickup)");
     }
     else if (state == AUTOMATIC)
     {
