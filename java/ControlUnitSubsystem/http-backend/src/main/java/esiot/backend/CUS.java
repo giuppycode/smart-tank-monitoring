@@ -55,7 +55,9 @@ public class CUS {
 
         WebClient client = WebClient.create(vertx);
 
-        MqttService mqttService = new MqttService(vertx, client, PORT, null);
+        MqttService mqttService = new MqttService(vertx, client, PORT, distance -> {
+            dataService.onDistanceReceived(distance);
+        });
         mqttService.start();
     }
 }
